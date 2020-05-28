@@ -1,3 +1,7 @@
+# Security
+Tired of hackers stealing your drug locations? Faking drugs? Install this updated version with protected server events!
+- [Security FiveM Forum Thread](https://forum.cfx.re/t/re-release-esx-security-patches-updates-jail-qalle-jail-communityservice/1292760)
+
 # esx_illegal_drugs
 This is the old esx_drugs which contain opium, weed, cocaine & meth.  
 This was a fork from [esx_drugs](https://github.com/ESX-Org/esx_drugs) but they changed the way they do drugs and they only use weed now.  
