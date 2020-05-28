@@ -1,3 +1,8 @@
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~= --
+--		   	   	Created By: XxFri3ndlyxX		          --
+--			 Protected By: ATG-Github AKA ATG			  --
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~= --
+
 local Keys = {
 	["ESC"] = 322, ["F1"] = 288, ["F2"] = 289, ["F3"] = 170, ["F5"] = 166, ["F6"] = 167, ["F7"] = 168, ["F8"] = 169, ["F9"] = 56, ["F10"] = 57,
 	["~"] = 243, ["1"] = 157, ["2"] = 158, ["3"] = 160, ["4"] = 164, ["5"] = 165, ["6"] = 159, ["7"] = 161, ["8"] = 162, ["9"] = 163, ["-"] = 84, ["="] = 83, ["BACKSPACE"] = 177,
@@ -32,6 +37,12 @@ Citizen.CreateThread(function()
 		TriggerEvent('esx:getSharedObject', function(obj) ESX = obj end)
 		Citizen.Wait(0)
 	end
+	ESX.TriggerServerCallback('esx_drugs:getCoords', function(retTbl)
+		Config.Zones = retTbl;
+	end)
+	ESX.TriggerServerCallback('esx_drugs:getCoords', function(retTbl)
+		Config.Map = retTbl;
+	end)
 end)
 
 AddEventHandler('esx_illegal_drugs:hasEnteredMarker', function(zone)
@@ -270,6 +281,9 @@ end)
 
 -- Render markers
 Citizen.CreateThread(function()
+	repeat
+		Wait(1000)
+	until Config.Zones ~= nil
     while true do
 
         Wait(0)
@@ -287,6 +301,9 @@ end)
 
 -- Create Blips
 Citizen.CreateThread(function()
+	repeat
+		Wait(1000)
+	until Config.Map ~= nil
 	if Config.DisableBlip == false then
 	for i=1, #Config.Map, 1 do
 		
@@ -321,6 +338,9 @@ end)
 
 -- Activate menu when player is inside marker
 Citizen.CreateThread(function()
+	repeat
+		Wait(1000)
+	until Config.Zones ~= nil
 	while true do
 
 		Citizen.Wait(0)

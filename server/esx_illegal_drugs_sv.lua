@@ -1,6 +1,12 @@
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~= --
+--		   	   	Created By: XxFri3ndlyxX		          --
+--			 Protected By: ATG-Github AKA ATG			  --
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~= --
+
 ESX = nil
 
 local CopsConnected = 0
+local activeCops = {}
 local PlayersHarvestingCoke, PlayersTransformingCoke, PlayersSellingCoke, PlayersHarvestingMeth, PlayersTransformingMeth, PlayersSellingMeth, PlayersHarvestingWeed, PlayersTransformingWeed, PlayersSellingWeed, PlayersHarvestingOpium, PlayersTransformingOpium, PlayersSellingOpium = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
 
 TriggerEvent('esx:getSharedObject', function(obj)
@@ -8,22 +14,53 @@ TriggerEvent('esx:getSharedObject', function(obj)
 end)
 
 function CountCops()
-	local xPlayers = ESX.GetPlayers()
-
-	CopsConnected = 0
-
-	for i = 1, #xPlayers, 1 do
-		local xPlayer = ESX.GetPlayerFromId(xPlayers[i])
-		
-		if xPlayer.job.name == 'police' then
-			CopsConnected = CopsConnected + 1
-		end
-	end
-
-	SetTimeout(120 * 1000, CountCops)
+    return CopsConnected
 end
 
-CountCops()
+function fetchCops()
+    local xPlayers = ESX.GetPlayers()
+    CopsConnected = 0
+    for i = 1, #xPlayers, 1 do
+        local xPlayer = ESX.GetPlayerFromId(xPlayers[i])
+        if xPlayer.job.name == "police" then
+            CopsConnected = CopsConnected + 1
+            activeCops[#activeCops + 1] = xPlayer.source
+        end
+    end
+    SetTimeout(120 * 1000, fetchCops)
+end
+
+Citizen.CreateThread(fetchCops)
+
+
+function ensureLegitness(xPlayer, dCoord)
+	local xPlayer, dCoord = xPlayer, dCoord;
+	local legit = {["legit"] = true, ["reason"] = "No flags found."}
+	if xPlayer ~= nil then
+		local pCoord = xPlayer.getCoords();
+		if pCoord ~= nil then
+			if drug ~= nil then
+				local distance = #(pCoord - vector3(dCoord.x, dCoord.y, dCoord.z));
+				local radius = tonumber(Config.ZoneSize.x * Config.ZoneSize.y * Config.ZoneSize.z)
+				if distance < radius * 2.5 then
+					return legit
+				else
+					legit = {["legit"] = false, ["reason"] = "Player was out of the radius."}
+					return legit
+				end
+			else
+				legit = {["legit"] = false, ["reason"] = "The drug type was not supplied."}
+				return legit
+			end
+		else
+			legit = {["legit"] = false, ["reason"] = "Player coords were nil."}
+			return legit
+		end
+	else
+		legit = {["legit"] = false, ["reason"] = "xPlayer was nil."}
+		return legit
+	end
+end
 
 -- Weed
 local function HarvestWeed(source)
@@ -39,11 +76,21 @@ local function HarvestWeed(source)
 		if PlayersHarvestingWeed[source] == true then
 			local weed = xPlayer.getInventoryItem('weed')
 
-			if not xPlayer.canCarryItem('weed', weed.weight) then
-				xPlayer.showNotification(_U('inv_full_weed'))
+			local legit = ensureLegitness(xPlayer, Config.Zones.WeedField);
+			if legit["legit"] == true then
+				if not xPlayer.canCarryItem('weed', weed.weight) then
+					xPlayer.showNotification(_U('inv_full_weed'))
+				else
+					xPlayer.addInventoryItem('weed', 1)
+					HarvestWeed(source)
+				end
 			else
-				xPlayer.addInventoryItem('weed', 1)
-				HarvestWeed(source)
+				print(
+					string.format(
+						"^2%s^7 -> [^1%s^7] ^1%s^7 has attempted to collect ^2weed^7 but the legitness check returned false because ^1%s^7.",
+						GetCurrentResourceName(), _source, GetPlayerName(_source), legit["reason"]
+					)
+				)
 			end
 
 		end
@@ -81,15 +128,25 @@ local function TransformWeed(source)
 			local weedQuantity = xPlayer.getInventoryItem('weed').count
 			local poochQuantity = xPlayer.getInventoryItem('weed_pooch').count
 
-			if poochQuantity > 15 then
-				xPlayer.showNotification(_U('too_many_pouches'))
-			elseif weedQuantity < 28 then
-				xPlayer.showNotification(_U('not_enough_weed'))
+			local legit = ensureLegitness(xPlayer, Config.Zones.WeedProcessing);
+			if legit["legit"] == true then
+				if poochQuantity > 15 then
+					xPlayer.showNotification(_U('too_many_pouches'))
+				elseif weedQuantity < 28 then
+					xPlayer.showNotification(_U('not_enough_weed'))
+				else
+					xPlayer.removeInventoryItem('weed', 28)
+					xPlayer.addInventoryItem('weed_pooch', 1)
+					
+					TransformWeed(source)
+				end
 			else
-				xPlayer.removeInventoryItem('weed', 28)
-				xPlayer.addInventoryItem('weed_pooch', 1)
-				
-				TransformWeed(source)
+				print(
+					string.format(
+						"^2%s^7 -> [^1%s^7] ^1%s^7 has attempted to process ^2weed^7 but the legitness check returned false because ^1%s^7.",
+						GetCurrentResourceName(), _source, GetPlayerName(_source), legit["reason"]
+					)
+				)
 			end
 		end
 	end)
@@ -125,47 +182,56 @@ local function SellWeed(source)
 		if PlayersSellingWeed[source] == true then
 			local poochQuantity = xPlayer.getInventoryItem('weed_pooch').count
 
-			if poochQuantity == 0 then
-				xPlayer.showNotification(_U('no_pouches_weed_sale'))
-			else
-				xPlayer.removeInventoryItem('weed_pooch', 1)
-					
-				if CopsConnected == 0 then
-					xPlayer.addAccountMoney('black_money', 100)
-					xPlayer.showNotification(_U('sold_one_weed'))
-				elseif CopsConnected == 1 then
-					xPlayer.addAccountMoney('black_money', 1000)
-					xPlayer.showNotification(_U('sold_one_weed'))
-				elseif CopsConnected == 2 then
-					xPlayer.addAccountMoney('black_money', 1100)
-					xPlayer.showNotification(_U('sold_one_weed'))
-				elseif CopsConnected == 3 then
-					xPlayer.addAccountMoney('black_money', 1200)
-					xPlayer.showNotification(_U('sold_one_weed'))
-				elseif CopsConnected >= 4 then
-					xPlayer.addAccountMoney('black_money', 1300)
-					xPlayer.showNotification(_U('sold_one_weed'))
-				elseif CopsConnected >= 5 then
-					xPlayer.addAccountMoney('black_money', 1400)
-					xPlayer.showNotification(_U('sold_one_weed'))
-                elseif CopsConnected >= 6 then
-					xPlayer.addAccountMoney('black_money', 1500)
-					xPlayer.showNotification(_U('sold_one_weed'))
-                elseif CopsConnected >= 7 then
-					xPlayer.addAccountMoney('black_money', 1600)
-					xPlayer.showNotification(_U('sold_one_weed'))
-                elseif CopsConnected >= 8 then
-					xPlayer.addAccountMoney('black_money', 1700)
-					xPlayer.showNotification(_U('sold_one_weed'))
-                elseif CopsConnected >= 9 then
-					xPlayer.addAccountMoney('black_money', 1800)
-					xPlayer.showNotification(_U('sold_one_weed'))
-                elseif CopsConnected >= 10 then
-					xPlayer.addAccountMoney('black_money', 1900)
-					xPlayer.showNotification(_U('sold_one_weed'))			
+			local legit = ensureLegitness(xPlayer, Config.Zones.WeedDealer);
+			if legit["legit"] == true then
+				if poochQuantity == 0 then
+					xPlayer.showNotification(_U('no_pouches_weed_sale'))
+				else
+					xPlayer.removeInventoryItem('weed_pooch', 1)
+						
+					if CopsConnected == 0 then
+						xPlayer.addAccountMoney('black_money', 100)
+						xPlayer.showNotification(_U('sold_one_weed'))
+					elseif CopsConnected == 1 then
+						xPlayer.addAccountMoney('black_money', 1000)
+						xPlayer.showNotification(_U('sold_one_weed'))
+					elseif CopsConnected == 2 then
+						xPlayer.addAccountMoney('black_money', 1100)
+						xPlayer.showNotification(_U('sold_one_weed'))
+					elseif CopsConnected == 3 then
+						xPlayer.addAccountMoney('black_money', 1200)
+						xPlayer.showNotification(_U('sold_one_weed'))
+					elseif CopsConnected >= 4 then
+						xPlayer.addAccountMoney('black_money', 1300)
+						xPlayer.showNotification(_U('sold_one_weed'))
+					elseif CopsConnected >= 5 then
+						xPlayer.addAccountMoney('black_money', 1400)
+						xPlayer.showNotification(_U('sold_one_weed'))
+					elseif CopsConnected >= 6 then
+						xPlayer.addAccountMoney('black_money', 1500)
+						xPlayer.showNotification(_U('sold_one_weed'))
+					elseif CopsConnected >= 7 then
+						xPlayer.addAccountMoney('black_money', 1600)
+						xPlayer.showNotification(_U('sold_one_weed'))
+					elseif CopsConnected >= 8 then
+						xPlayer.addAccountMoney('black_money', 1700)
+						xPlayer.showNotification(_U('sold_one_weed'))
+					elseif CopsConnected >= 9 then
+						xPlayer.addAccountMoney('black_money', 1800)
+						xPlayer.showNotification(_U('sold_one_weed'))
+					elseif CopsConnected >= 10 then
+						xPlayer.addAccountMoney('black_money', 1900)
+						xPlayer.showNotification(_U('sold_one_weed'))			
+					end
+					SellWeed(source)
 				end
-				
-				SellWeed(source)
+			else
+				print(
+					string.format(
+						"^2%s^7 -> [^1%s^7] ^1%s^7 has attempted to sell ^2weed^7 but the legitness check returned false because ^1%s^7.",
+						GetCurrentResourceName(), _source, GetPlayerName(_source), legit["reason"]
+					)
+				)
 			end
 		end
 	end)
@@ -200,14 +266,24 @@ local function HarvestOpium(source)
 	end
 
 	SetTimeout(Config.TimeToFarmOpium, function()
-		if PlayersHarvestingOpium[source] == true then
+		if PlayersHarvestingOpium[_source] == true then
 			local opium = xPlayer.getInventoryItem('opium')
 
-			if not xPlayer.canCarryItem('opium', opium.weight) then
-				xPlayer.showNotification(_U('inv_full_opium'))
+			local legit = ensureLegitness(xPlayer, Config.Zones.OpiumField);
+			if legit["legit"] == true then
+				if not xPlayer.canCarryItem('opium', opium.weight) then
+					xPlayer.showNotification(_U('inv_full_opium'))
+				else
+					xPlayer.addInventoryItem('opium', 1)
+					HarvestOpium(_source)
+				end
 			else
-				xPlayer.addInventoryItem('opium', 1)
-				HarvestOpium(source)
+				print(
+					string.format(
+						"^2%s^7 -> [^1%s^7] ^1%s^7 has attempted to collect ^2opium^7 but the legitness check returned false because ^1%s^7.",
+						GetCurrentResourceName(), _source, GetPlayerName(_source), legit["reason"]
+					)
+				)
 			end
 		end
 	end)
@@ -244,15 +320,25 @@ local function TransformOpium(source)
 			local opiumQuantity = xPlayer.getInventoryItem('opium').count
 			local poochQuantity = xPlayer.getInventoryItem('opium_pooch').count
 
-			if poochQuantity > 15 then
-				xPlayer.showNotification(_U('too_many_pouches'))
-			elseif opiumQuantity < 28 then
-				xPlayer.showNotification(_U('not_enough_opium'))
+			local legit = ensureLegitness(xPlayer, Config.Zones.OpiumProcessing);
+			if legit["legit"] == true then
+				if poochQuantity > 15 then
+					xPlayer.showNotification(_U('too_many_pouches'))
+				elseif opiumQuantity < 28 then
+					xPlayer.showNotification(_U('not_enough_opium'))
+				else
+					xPlayer.removeInventoryItem('opium', 28)
+					xPlayer.addInventoryItem('opium_pooch', 1)
+				
+					TransformOpium(source)
+				end
 			else
-				xPlayer.removeInventoryItem('opium', 28)
-				xPlayer.addInventoryItem('opium_pooch', 1)
-			
-				TransformOpium(source)
+				print(
+					string.format(
+						"^2%s^7 -> [^1%s^7] ^1%s^7 has attempted to process ^2opium^7 but the legitness check returned false because ^1%s^7.",
+						GetCurrentResourceName(), _source, GetPlayerName(_source), legit["reason"]
+					)
+				)
 			end
 		end
 	end)
@@ -285,50 +371,60 @@ local function SellOpium(source)
 	end
 
 	SetTimeout(Config.TimeToSellOpium, function()
-		if PlayersSellingOpium[source] == true then
+		if PlayersSellingOpium[_source] == true then
 			local poochQuantity = xPlayer.getInventoryItem('opium_pooch').count
 
-			if poochQuantity == 0 then
-				xPlayer.showNotification(_U('no_pouches_opium_sale'))
-			else
-				xPlayer.removeInventoryItem('opium_pooch', 1)
-						
-				if CopsConnected == 0 then
-					xPlayer.addAccountMoney('black_money', 200)
-					xPlayer.showNotification(_U('sold_one_opium'))
-				elseif CopsConnected == 1 then
-					xPlayer.addAccountMoney('black_money', 2000)
-					xPlayer.showNotification(_U('sold_one_opium'))
-				elseif CopsConnected == 2 then
-					xPlayer.addAccountMoney('black_money', 2100)
-					xPlayer.showNotification(_U('sold_one_opium'))
-				elseif CopsConnected == 3 then
-					xPlayer.addAccountMoney('black_money', 2200)
-					xPlayer.showNotification(_U('sold_one_opium'))
-				elseif CopsConnected == 4 then
-					xPlayer.addAccountMoney('black_money', 2300)
-					xPlayer.showNotification(_U('sold_one_opium'))
-				elseif CopsConnected >= 5 then
-					xPlayer.addAccountMoney('black_money', 2400)
-					xPlayer.showNotification(_U('sold_one_opium'))
-                elseif CopsConnected >= 6 then
-					xPlayer.addAccountMoney('black_money', 2500)
-					xPlayer.showNotification(_U('sold_one_opium'))
-                elseif CopsConnected >= 7 then
-					xPlayer.addAccountMoney('black_money', 2600)
-					xPlayer.showNotification(_U('sold_one_opium'))
-                elseif CopsConnected >= 8 then
-					xPlayer.addAccountMoney('black_money', 2700)
-					xPlayer.showNotification(_U('sold_one_opium'))
-                elseif CopsConnected >= 9 then
-					xPlayer.addAccountMoney('black_money', 2800)
-					xPlayer.showNotification(_U('sold_one_opium'))
-                elseif CopsConnected >= 10 then
-					xPlayer.addAccountMoney('black_money', 2900)
-					xPlayer.showNotification(_U('sold_one_opium'))		
+			local legit = ensureLegitness(xPlayer, Config.Zones.OpiumDealer);
+			if legit["legit"] == true then
+				if poochQuantity == 0 then
+					xPlayer.showNotification(_U('no_pouches_opium_sale'))
+				else
+					xPlayer.removeInventoryItem('opium_pooch', 1)
+							
+					if CopsConnected == 0 then
+						xPlayer.addAccountMoney('black_money', 200)
+						xPlayer.showNotification(_U('sold_one_opium'))
+					elseif CopsConnected == 1 then
+						xPlayer.addAccountMoney('black_money', 2000)
+						xPlayer.showNotification(_U('sold_one_opium'))
+					elseif CopsConnected == 2 then
+						xPlayer.addAccountMoney('black_money', 2100)
+						xPlayer.showNotification(_U('sold_one_opium'))
+					elseif CopsConnected == 3 then
+						xPlayer.addAccountMoney('black_money', 2200)
+						xPlayer.showNotification(_U('sold_one_opium'))
+					elseif CopsConnected == 4 then
+						xPlayer.addAccountMoney('black_money', 2300)
+						xPlayer.showNotification(_U('sold_one_opium'))
+					elseif CopsConnected >= 5 then
+						xPlayer.addAccountMoney('black_money', 2400)
+						xPlayer.showNotification(_U('sold_one_opium'))
+					elseif CopsConnected >= 6 then
+						xPlayer.addAccountMoney('black_money', 2500)
+						xPlayer.showNotification(_U('sold_one_opium'))
+					elseif CopsConnected >= 7 then
+						xPlayer.addAccountMoney('black_money', 2600)
+						xPlayer.showNotification(_U('sold_one_opium'))
+					elseif CopsConnected >= 8 then
+						xPlayer.addAccountMoney('black_money', 2700)
+						xPlayer.showNotification(_U('sold_one_opium'))
+					elseif CopsConnected >= 9 then
+						xPlayer.addAccountMoney('black_money', 2800)
+						xPlayer.showNotification(_U('sold_one_opium'))
+					elseif CopsConnected >= 10 then
+						xPlayer.addAccountMoney('black_money', 2900)
+						xPlayer.showNotification(_U('sold_one_opium'))		
+					end
+					
+					SellOpium(_source)
 				end
-				
-				SellOpium(source)
+			else
+				print(
+					string.format(
+						"^2%s^7 -> [^1%s^7] ^1%s^7 has attempted to sell ^2opium^7 but the legitness check returned false because ^1%s^7.",
+						GetCurrentResourceName(), _source, GetPlayerName(_source), legit["reason"]
+					)
+				)
 			end
 		end
 	end)
@@ -366,11 +462,22 @@ local function HarvestCoke(source)
 		if PlayersHarvestingCoke[source] == true then
 			local coke = xPlayer.getInventoryItem('coke')
 
-			if not xPlayer.canCarryItem('coke', coke.weight) then
-				xPlayer.showNotification(_U('inv_full_coke'))
+			local legit = ensureLegitness(xPlayer, Config.Zones.CokeField);
+			if legit["legit"] == true then
+
+				if not xPlayer.canCarryItem('coke', coke.weight) then
+					xPlayer.showNotification(_U('inv_full_coke'))
+				else
+					xPlayer.addInventoryItem('coke', 1)
+					HarvestCoke(source)
+				end
 			else
-				xPlayer.addInventoryItem('coke', 1)
-				HarvestCoke(source)
+				print(
+					string.format(
+						"^2%s^7 -> [^1%s^7] ^1%s^7 has attempted to collect ^2coke^7 but the legitness check returned false because ^1%s^7.",
+						GetCurrentResourceName(), _source, GetPlayerName(_source), legit["reason"]
+					)
+				)
 			end
 		end
 	end)
@@ -407,15 +514,26 @@ local function TransformCoke(source)
 			local cokeQuantity = xPlayer.getInventoryItem('coke').count
 			local poochQuantity = xPlayer.getInventoryItem('coke_pooch').count
 
-			if poochQuantity > 15 then
-				xPlayer.showNotification(_U('too_many_pouches'))
-			elseif cokeQuantity < 28 then
-				xPlayer.showNotification(_U('not_enough_coke'))
+			local legit = ensureLegitness(xPlayer, Config.Zones.CokeProcessing);
+			if legit["legit"] == true then
+
+				if poochQuantity > 15 then
+					xPlayer.showNotification(_U('too_many_pouches'))
+				elseif cokeQuantity < 28 then
+					xPlayer.showNotification(_U('not_enough_coke'))
+				else
+					xPlayer.removeInventoryItem('coke', 28)
+					xPlayer.addInventoryItem('coke_pooch', 1)
+				
+					TransformCoke(source)
+				end
 			else
-				xPlayer.removeInventoryItem('coke', 28)
-				xPlayer.addInventoryItem('coke_pooch', 1)
-			
-				TransformCoke(source)
+				print(
+					string.format(
+						"^2%s^7 -> [^1%s^7] ^1%s^7 has attempted to process ^2coke^7 but the legitness check returned false because ^1%s^7.",
+						GetCurrentResourceName(), _source, GetPlayerName(_source), legit["reason"]
+					)
+				)
 			end
 		end
 	end)
@@ -451,47 +569,57 @@ local function SellCoke(source)
 		if PlayersSellingCoke[source] == true then
 			local poochQuantity = xPlayer.getInventoryItem('coke_pooch').count
 
-			if poochQuantity == 0 then
-				xPlayer.showNotification(_U('no_pouches_coke_sale'))
-			else
-				xPlayer.removeInventoryItem('coke_pooch', 1)
-						
-				if CopsConnected == 0 then
-					xPlayer.addAccountMoney('black_money', 300)
-					xPlayer.showNotification(_U('sold_one_coke'))
-				elseif CopsConnected == 1 then
-					xPlayer.addAccountMoney('black_money', 3000)
-					xPlayer.showNotification(_U('sold_one_coke'))
-				elseif CopsConnected == 2 then
-					xPlayer.addAccountMoney('black_money', 3100)
-					xPlayer.showNotification(_U('sold_one_coke'))
-				elseif CopsConnected == 3 then
-					xPlayer.addAccountMoney('black_money', 3200)
-					xPlayer.showNotification(_U('sold_one_coke'))
-				elseif CopsConnected == 4 then
-					xPlayer.addAccountMoney('black_money', 3300)
-					xPlayer.showNotification(_U('sold_one_coke'))
-				elseif CopsConnected >= 5 then
-					xPlayer.addAccountMoney('black_money', 3400)
-					xPlayer.showNotification(_U('sold_one_coke'))
-                elseif CopsConnected >= 6 then
-					xPlayer.addAccountMoney('black_money', 3500)
-					xPlayer.showNotification(_U('sold_one_coke'))
-                elseif CopsConnected >= 7 then
-					xPlayer.addAccountMoney('black_money', 3600)
-					xPlayer.showNotification(_U('sold_one_coke'))
-                elseif CopsConnected >= 8 then
-					xPlayer.addAccountMoney('black_money', 3700)
-					xPlayer.showNotification(_U('sold_one_coke'))
-                elseif CopsConnected >= 9 then
-					xPlayer.addAccountMoney('black_money', 3800)
-					xPlayer.showNotification(_U('sold_one_coke'))
-                elseif CopsConnected >= 10 then
-					xPlayer.addAccountMoney('black_money', 3900)
-					xPlayer.showNotification(_U('sold_one_coke'))	
+			local legit = ensureLegitness(xPlayer, Config.Zones.CokeDealer);
+			if legit["legit"] == true then
+				if poochQuantity == 0 then
+					xPlayer.showNotification(_U('no_pouches_coke_sale'))
+				else
+					xPlayer.removeInventoryItem('coke_pooch', 1)
+							
+					if CopsConnected == 0 then
+						xPlayer.addAccountMoney('black_money', 300)
+						xPlayer.showNotification(_U('sold_one_coke'))
+					elseif CopsConnected == 1 then
+						xPlayer.addAccountMoney('black_money', 3000)
+						xPlayer.showNotification(_U('sold_one_coke'))
+					elseif CopsConnected == 2 then
+						xPlayer.addAccountMoney('black_money', 3100)
+						xPlayer.showNotification(_U('sold_one_coke'))
+					elseif CopsConnected == 3 then
+						xPlayer.addAccountMoney('black_money', 3200)
+						xPlayer.showNotification(_U('sold_one_coke'))
+					elseif CopsConnected == 4 then
+						xPlayer.addAccountMoney('black_money', 3300)
+						xPlayer.showNotification(_U('sold_one_coke'))
+					elseif CopsConnected >= 5 then
+						xPlayer.addAccountMoney('black_money', 3400)
+						xPlayer.showNotification(_U('sold_one_coke'))
+					elseif CopsConnected >= 6 then
+						xPlayer.addAccountMoney('black_money', 3500)
+						xPlayer.showNotification(_U('sold_one_coke'))
+					elseif CopsConnected >= 7 then
+						xPlayer.addAccountMoney('black_money', 3600)
+						xPlayer.showNotification(_U('sold_one_coke'))
+					elseif CopsConnected >= 8 then
+						xPlayer.addAccountMoney('black_money', 3700)
+						xPlayer.showNotification(_U('sold_one_coke'))
+					elseif CopsConnected >= 9 then
+						xPlayer.addAccountMoney('black_money', 3800)
+						xPlayer.showNotification(_U('sold_one_coke'))
+					elseif CopsConnected >= 10 then
+						xPlayer.addAccountMoney('black_money', 3900)
+						xPlayer.showNotification(_U('sold_one_coke'))	
+					end
+					
+					SellCoke(source)
 				end
-				
-				SellCoke(source)
+			else
+				print(
+					string.format(
+						"^2%s^7 -> [^1%s^7] ^1%s^7 has attempted to sell ^2coke^7 but the legitness check returned false because ^1%s^7.",
+						GetCurrentResourceName(), _source, GetPlayerName(_source), legit["reason"]
+					)
+				)
 			end
 		end
 	end)
@@ -528,12 +656,21 @@ local function HarvestMeth(source)
 	SetTimeout(Config.TimeToFarmMeth, function()
 		if PlayersHarvestingMeth[source] == true then
 			local meth = xPlayer.getInventoryItem('meth')
-
-			if not xPlayer.canCarryItem('meth', meth.weight) then
-				xPlayer.showNotification(_U('inv_full_meth'))
+			local legit = ensureLegitness(xPlayer, Config.Zones.MethField);
+			if legit["legit"] == true then
+				if not xPlayer.canCarryItem('meth', meth.weight) then
+					xPlayer.showNotification(_U('inv_full_meth'))
+				else
+					xPlayer.addInventoryItem('meth', 1)
+					HarvestMeth(source)
+				end
 			else
-				xPlayer.addInventoryItem('meth', 1)
-				HarvestMeth(source)
+				print(
+					string.format(
+						"^2%s^7 -> [^1%s^7] ^1%s^7 has attempted to collect ^2meth^7 but the legitness check returned false because ^1%s^7.",
+						GetCurrentResourceName(), _source, GetPlayerName(_source), legit["reason"]
+					)
+				)
 			end
 		end
 	end)
@@ -570,15 +707,25 @@ local function TransformMeth(source)
 			local methQuantity = xPlayer.getInventoryItem('meth').count
 			local poochQuantity = xPlayer.getInventoryItem('meth_pooch').count
 
-			if poochQuantity > 28 then
-				xPlayer.showNotification(_U('too_many_pouches'))
-			elseif methQuantity < 15 then
-				xPlayer.showNotification(_U('not_enough_meth'))
+			local legit = ensureLegitness(xPlayer, Config.Zones.MethProcessing);
+			if legit["legit"] == true then
+				if poochQuantity > 28 then
+					xPlayer.showNotification(_U('too_many_pouches'))
+				elseif methQuantity < 15 then
+					xPlayer.showNotification(_U('not_enough_meth'))
+				else
+					xPlayer.removeInventoryItem('meth', 28)
+					xPlayer.addInventoryItem('meth_pooch', 1)
+					
+					TransformMeth(source)
+				end
 			else
-				xPlayer.removeInventoryItem('meth', 28)
-				xPlayer.addInventoryItem('meth_pooch', 1)
-				
-				TransformMeth(source)
+				print(
+					string.format(
+						"^2%s^7 -> [^1%s^7] ^1%s^7 has attempted to process ^2meth^7 but the legitness check returned false because ^1%s^7.",
+						GetCurrentResourceName(), _source, GetPlayerName(_source), legit["reason"]
+					)
+				)
 			end
 		end
 	end)
@@ -613,48 +760,57 @@ local function SellMeth(source)
 	SetTimeout(Config.TimeToSellMeth, function()
 		if PlayersSellingMeth[source] == true then
 			local poochQuantity = xPlayer.getInventoryItem('meth_pooch').count
-
-			if poochQuantity == 0 then
-				xPlayer.showNotification(_U('no_pouches_meth_sale'))
-			else
-				xPlayer.removeInventoryItem('meth_pooch', 1)
+			local legit = ensureLegitness(xPlayer, Config.Zones.MethDealer);
+			if legit["legit"] == true then
+				if poochQuantity == 0 then
+					xPlayer.showNotification(_U('no_pouches_meth_sale'))
+				else
+					xPlayer.removeInventoryItem('meth_pooch', 1)
+						
+					if CopsConnected == 0 then
+						xPlayer.addAccountMoney('black_money', 400)
+						xPlayer.showNotification(_U('sold_one_meth'))
+					elseif CopsConnected == 1 then
+						xPlayer.addAccountMoney('black_money', 4000)
+						xPlayer.showNotification(_U('sold_one_meth'))
+					elseif CopsConnected == 2 then
+						xPlayer.addAccountMoney('black_money', 4100)
+						xPlayer.showNotification(_U('sold_one_meth'))
+					elseif CopsConnected == 3 then
+						xPlayer.addAccountMoney('black_money', 4200)
+						xPlayer.showNotification(_U('sold_one_meth'))
+					elseif CopsConnected == 4 then
+						xPlayer.addAccountMoney('black_money', 4300)
+						xPlayer.showNotification(_U('sold_one_meth'))
+					elseif CopsConnected == 5 then
+						xPlayer.addAccountMoney('black_money', 4400)
+						xPlayer.showNotification(_U('sold_one_meth'))
+					elseif CopsConnected >= 6 then
+						xPlayer.addAccountMoney('black_money', 4500)
+						xPlayer.showNotification(_U('sold_one_meth'))
+					elseif CopsConnected >= 7 then
+						xPlayer.addAccountMoney('black_money', 4600)
+						xPlayer.showNotification(_U('sold_one_meth'))
+					elseif CopsConnected >= 8 then
+						xPlayer.addAccountMoney('black_money', 4700)
+						xPlayer.showNotification(_U('sold_one_meth'))
+					elseif CopsConnected >= 9 then
+						xPlayer.addAccountMoney('black_money', 4800)
+						xPlayer.showNotification(_U('sold_one_meth'))
+					elseif CopsConnected >= 10 then
+						xPlayer.addAccountMoney('black_money', 4900)
+						xPlayer.showNotification(_U('sold_one_meth'))	
+					end
 					
-				if CopsConnected == 0 then
-					xPlayer.addAccountMoney('black_money', 400)
-					xPlayer.showNotification(_U('sold_one_meth'))
-				elseif CopsConnected == 1 then
-					xPlayer.addAccountMoney('black_money', 4000)
-					xPlayer.showNotification(_U('sold_one_meth'))
-				elseif CopsConnected == 2 then
-					xPlayer.addAccountMoney('black_money', 4100)
-					xPlayer.showNotification(_U('sold_one_meth'))
-				elseif CopsConnected == 3 then
-					xPlayer.addAccountMoney('black_money', 4200)
-					xPlayer.showNotification(_U('sold_one_meth'))
-				elseif CopsConnected == 4 then
-					xPlayer.addAccountMoney('black_money', 4300)
-					xPlayer.showNotification(_U('sold_one_meth'))
-				elseif CopsConnected == 5 then
-					xPlayer.addAccountMoney('black_money', 4400)
-					xPlayer.showNotification(_U('sold_one_meth'))
-				elseif CopsConnected >= 6 then
-					xPlayer.addAccountMoney('black_money', 4500)
-					xPlayer.showNotification(_U('sold_one_meth'))
-                elseif CopsConnected >= 7 then
-					xPlayer.addAccountMoney('black_money', 4600)
-					xPlayer.showNotification(_U('sold_one_meth'))
-                elseif CopsConnected >= 8 then
-					xPlayer.addAccountMoney('black_money', 4700)
-					xPlayer.showNotification(_U('sold_one_meth'))
-                elseif CopsConnected >= 9 then
-					xPlayer.addAccountMoney('black_money', 4800)
-					xPlayer.showNotification(_U('sold_one_meth'))
-                elseif CopsConnected >= 10 then
-					xPlayer.addAccountMoney('black_money', 4900)
-					xPlayer.showNotification(_U('sold_one_meth'))	
+					SellMeth(source)
 				end
-				
-				SellMeth(source)
+			else
+				print(
+					string.format(
+						"^2%s^7 -> [^1%s^7] ^1%s^7 has attempted to sell ^2meth^7 but the legitness check returned false because ^1%s^7.",
+						GetCurrentResourceName(), _source, GetPlayerName(_source), legit["reason"]
+					)
+				)
 			end
 		end
 	end)
@@ -724,4 +880,21 @@ ESX.RegisterUsableItem('coke', function(source)
 
 	TriggerClientEvent('esx_illegal_drugs:onCoke', _source)
 	xPlayer.showNotification(_U('used_one_coke'))
+end)
+
+
+local calledUsers = {};
+ESX.RegisterServerCallback('esx_drugs:getCoords', function(source, cb)
+	if calledUsers[source] == nil then
+		calledUsers[source] = true;
+		cb(Config.Zones)
+	end
+end)
+
+local calledUsers1 = {};
+ESX.RegisterServerCallback('esx_drugs:getCoords1', function(source, cb)
+	if calledUsers1[source] == nil then
+		calledUsers1[source] = true;
+		cb(Config.Map)
+	end
 end)
