@@ -37,7 +37,7 @@ function ensureLegitness(xPlayer, dCoord)
 	local xPlayer, dCoord = xPlayer, dCoord;
 	local legit = {["legit"] = true, ["reason"] = "No flags found."}
 	if xPlayer ~= nil then
-		local pCoord = xPlayer.getCoords();
+		local pCoord = xPlayer.getCoords(true);
 		if pCoord ~= nil then
 			local distance = #(pCoord - vector3(dCoord.x, dCoord.y, dCoord.z));
 			local radius = tonumber(Config.ZoneSize.x * Config.ZoneSize.y * Config.ZoneSize.z)
