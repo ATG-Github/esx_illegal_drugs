@@ -39,17 +39,12 @@ function ensureLegitness(xPlayer, dCoord)
 	if xPlayer ~= nil then
 		local pCoord = xPlayer.getCoords();
 		if pCoord ~= nil then
-			if drug ~= nil then
-				local distance = #(pCoord - vector3(dCoord.x, dCoord.y, dCoord.z));
-				local radius = tonumber(Config.ZoneSize.x * Config.ZoneSize.y * Config.ZoneSize.z)
-				if distance < radius * 2.5 then
-					return legit
-				else
-					legit = {["legit"] = false, ["reason"] = "Player was out of the radius."}
-					return legit
-				end
+			local distance = #(pCoord - vector3(dCoord.x, dCoord.y, dCoord.z));
+			local radius = tonumber(Config.ZoneSize.x * Config.ZoneSize.y * Config.ZoneSize.z)
+			if distance < radius * 2.5 then
+				return legit
 			else
-				legit = {["legit"] = false, ["reason"] = "The drug type was not supplied."}
+				legit = {["legit"] = false, ["reason"] = "Player was out of the radius."}
 				return legit
 			end
 		else
