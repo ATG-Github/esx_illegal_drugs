@@ -36,9 +36,9 @@ Citizen.CreateThread(fetchCops)
 function ensureLegitness(xPlayer, dCoord)
 	local xPlayer, dCoord = xPlayer, dCoord;
 	local legit = {["legit"] = true, ["reason"] = "No flags found."}
-	if xPlayer ~= nil then
-		local pCoord = xPlayer.getCoords(true);
-		if pCoord ~= nil then
+	if xPlayer then
+		local pCoord = GetEntityCoords(GetPlayerPed(xPlayer.source))
+		if pCoord then
 			local distance = #(pCoord - vector3(dCoord.x, dCoord.y, dCoord.z));
 			local radius = tonumber(Config.ZoneSize.x * Config.ZoneSize.y * Config.ZoneSize.z)
 			if distance < radius * 2.5 then
